@@ -1,0 +1,106 @@
+##########################################################################
+###                   RNA-seq downstream analysis                      ###
+###          c. Akela Kuwahara 2019, c. Michelle Percharde 2017,       ###
+###         akela.kuwahara@ucsf.edu, michelle.percharde@ucsf.edu,      ###
+##########################################################################
+
+source("http://bioconductor.org/biocLite.R")
+
+library(limma)
+library(gdata)
+library(ggplot2)
+library(gplots)
+library("Rsamtools")
+library("DESeq2")
+library(Rsubread)
+
+######### read in raw counts ###########
+data<-read.table("embryo_rawcounts.txt", header=T, row.names=1, quote="", sep="\t")[,6:11]
+head(data)
+colnames(data) <- c("Mut1", "Mut2", "Mut3", "WT1", "WT2", "WT3")
+write.table(data, "featurecounts-genes-raw.txt", row.names=T, quote=F)
+    #NOTE: sometimes the first few columns of the rawcounts file have unneccessary 
+    #      information, in which case you want to select only the columns that have
+    #     your samples in them. eg. if your samples are in columns 6:11, do:
+    #     data -> data[,6:11]  
+
+
+#########################################################################
+##################    Filtering and normalization    ####################
+#########################################################################
+
+######### filter data ##########
+#filter out genes with no reads across samples. ie. counts per million = 0 for all samples
+keep <- rowSums(cpm(data)>0) >= 3 #this creates a TRUE/FALSE list for each gene name. This >=3 cutoff can be adjusted to be more or less stringent for expression cutoff.
+data2<-data[keep,] #keeps only rows of raw data where keep = TRUE.
+nrow(data2) 
+write.table(data2, "featurecounts-genes-cpm0-ALL-raw.txt", row.names=T, quote=F)
+
+######## normalization #########
+#need to make coldata.csv file with column names, sample name, and condition. example below.
+#       SampleName Condition
+# WT1          WT1         A 
+# WT2          WT2         A
+# WT3          WT3         A
+# Mut1        Mut1         B
+# Mut2        Mut2         B
+# Mut3        Mut3         B
+
+# Read in coldata file:
+info<-read.csv("coldata.csv", header=T, row.names=1) #read in coldata.csv file
+info #look at coldata
+
+
+#########################################################################
+################    Differential expression w/ DESeq2   #################
+#########################################################################
+
+matrix1 <- DESeqDataSetFromMatrix(countData = data2,  colData = info, design = ~ Condition) #creates matrix for DESeq. RAW data is processed to do Differential expression analysis NOT RLOG.
+DEmatrix1 <- DESeq(matrix1) #Performs DESeq on data using Condition from coldata which is A, B. "control" is listed first in coldata
+DEmatrix1 <- DESeq(matrix1, test=c("Wald"), betaPrior=T)
+toptable1<-results(DEmatrix1) 
+mcols(toptable1, use.names=T) #gives info on each column, P value is the Wald test p-value.
+
+summary(toptable1) #gives summary of DESeq analysis
+head(toptable1) #see what the data looks like
+
+### Export DESeq results
+# subset data to create tables of just DE genes with adjusted p-value >0.05, and log2FC > |-1|
+# NOTE: a cutoff of log2FC > |-1| is common, but you can also go lower for tissues that have very similar gene expression profiles, 
+#       or higher for tissues that are very different. You don't want to change the padj cutoff to be any higher.
+toptable1<-toptable1[order(toptable1$log2FoldChange),] #order table on increasing log2FC
+write.table(toptable1, "DESeq2-CPM0-toptable-ALL.txt", sep="\t", quote=F, row.names=T) #export ordered DESeq table with all non-zero genes
+toptableF<-subset(toptable1, toptable1$padj < 0.05) #Subset table to genes with padj>0.05
+dim(toptableF) #number of genes that make this cutoff
+write.table(toptableF, "DESeq2-CPM0-toptable-padj05.txt", sep="\t", quote=F, row.names=T) #export all padj>0.05 gene expression
+toptableFC<-subset(toptableF, toptableF$log2FoldChange < -1 | toptableF$log2FoldChange >1) #Subset table to genes with padj>0.05 and log2FC > |-1|
+dim(toptableFC) #number of genes that make this cutoff
+write.table(toptableFC, "DESeq2-CPM0-toptable-padj05-logfc1.txt", sep="\t", quote=F, row.names=T) # export all padj>0.05 and log2FC > |-1| gene expression
+
+####################################
+### Plot DESeq results - MA plot ###
+####################################
+
+#create column in toptable1 that specifies point color
+toptable1$Color = "black" #adds a color column and makes all genes black
+toptable1$Color[toptable1$log2FoldChange > 1 & toptable1$padj < 0.05] = "red" #makes genes that are higher in tissue A vs B red
+toptable1$Color[toptable1$log2FoldChange < -1 & toptable1$padj< 0.05] = "deepskyblue" #makes genes lower in tissue A vs B blue
+write.table(toptable1, "DESeq2-CPM0-toptable-ALL-color.txt", sep="\t", quote=F, row.names=T) #write out table
+
+toptable1<-as.data.frame(toptable1) #needs to be as.data.frame for plotting
+
+#MA plot
+ggplot(data=toptable1, aes(padj, log2FoldChange)) + #plot log10(baseMean) on x axis, log2FC on y-axis
+  geom_point(alpha=0.5, size=1, color=toptable1$Color) + #size and color of points
+  #geom_text(data=toptable1, colour = "black", size = 1,
+   #         label=rownames(toptable1), hjust = 0, nudge_x = 0.05, fontface="bold") + #labels all points, this makes the plot take a long time to load.
+  geom_hline(yintercept = 0, colour = "black", size=1) + #create y-intercept line at 0
+  geom_hline(yintercept = 1, colour = "red", size=0.8) + #create y-intercept line at log1FC = 1
+  geom_hline(yintercept = -1, colour = "blue", size=0.8) + #create y-intercept line at log1FC = -1
+  scale_y_continuous(breaks=seq(-6,6,1)) + #set y-axis tick marks/scale
+  xlab("log10 mean expression") + ylab("log2 fold change") + # x- and y-axis labels
+  theme(panel.background=element_rect(fill="white"), panel.grid.major=element_line(color="white", size=1)) + #background fill white, major grids white
+  theme(axis.text.x=element_text(size=20, color="black"), axis.text.y=element_text(size=20, color="black")) + #x- and y-axis font size
+  ggtitle("MA plot - TissueB vs TissueA") + #plot title
+  theme(plot.title = element_text(size=18,lineheight=.8, vjust=2)) #some formatting stuff
+
