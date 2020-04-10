@@ -39,12 +39,12 @@ write.table(data2, "featurecounts-genes-cpm0-ALL-raw.txt", row.names=T, quote=F)
 ######## normalization #########
 #need to make coldata.csv file with column names, sample name, and condition. example below.
 #       SampleName Condition
-# WT1          WT1         A 
-# WT2          WT2         A
-# WT3          WT3         A
-# Mut1        Mut1         B
-# Mut2        Mut2         B
-# Mut3        Mut3         B
+# WT1          WT1         WT 
+# WT2          WT2         WT
+# WT3          WT3         WT
+# Mut1        Mut1         Mut
+# Mut2        Mut2         Mut
+# Mut3        Mut3         Mut
 
 # Read in coldata file:
 info<-read.csv("coldata.csv", header=T, row.names=1) #read in coldata.csv file
