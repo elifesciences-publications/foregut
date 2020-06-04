@@ -1,0 +1,790 @@
+library(Seurat)
+library(cowplot)
+library(dplyr)
+setwd("~/Documents/sc-RNA-seq")
+e105fg.data <- Read10X(data.dir = "filtered_gene_bc_matrices/e9-5_FG_eppos/")
+e105fg <- CreateSeuratObject(counts = e105fg.data, min.cells = 3, min.features = 200, 
+                             project = "e105FG")
+e105fg
+# An object of class Seurat 
+# 17651 features across 6603 samples within 1 assay 
+# Active assay: RNA (17651 features)
+
+### cc normalization
+### Regress on cell cycle and nUMI
+
+cc.genes <- readLines(con = "Seurat/cell-cycle-regression/cell_cycle_vignette_files/regev_lab_cell_cycle_genes.txt")
+library(stringr)
+cc.genes <- str_to_title(cc.genes)
+s.genes <- cc.genes[1:43]
+g2m.genes <- cc.genes[44:97]
+
+e105fgC <- CreateSeuratObject(counts = e105fg.data, min.cells = 3, min.features = 200, 
+                              project = "e105FG")
+e105fgC
+# An object of class Seurat 
+# 17651 features across 6603 samples within 1 assay 
+# Active assay: RNA (17651 features)
+
+e105fgC[["percent.mt"]] <- PercentageFeatureSet(object = e105fgC, pattern = "^mt-")
+
+VlnPlot(object = e105fgC, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3)
+####Identify QC cutoffs to use based on these plots
+# nUMI: 7000, Inf
+# nGene: -Inf, Inf
+# percent.mito: -Inf, 7.5
+plot1 <- FeatureScatter(object = e105fgC, feature1 = "nCount_RNA", feature2 = "percent.mt")
+plot2 <- FeatureScatter(object = e105fgC, feature1 = "nCount_RNA", feature2 = "nFeature_RNA")
+CombinePlots(plots = list(plot1, plot2))
+
+e105fgC <- subset(x = e105fgC, subset = nFeature_RNA > 2000 & nFeature_RNA < 7000 & percent.mt > 0.5 & percent.mt < 7.5)
+
+e105fgC <- NormalizeData(object = e105fgC, normalization.method = "LogNormalize", scale.factor = 10000)
+e105fgC <- FindVariableFeatures(object = e105fgC, selection.method = "vst", nfeatures = 2000)
+
+# Identify the 10 most highly variable genes
+top10 <- head(x = VariableFeatures(object = e105fgC), 10)
+
+# plot variable features with and without labels
+plot1 <- VariableFeaturePlot(object = e105fgC)
+plot2 <- LabelPoints(plot = plot1, points = top10, repel = TRUE)
+CombinePlots(plots = list(plot1, plot2))
+
+all.genes <- rownames(x = e105fgC)
+
+#make new cc-norm seurat object (e95fgC)
+e105fgC <- CellCycleScoring(object = e105fgC, s.features = s.genes, g2m.features = g2m.genes, 
+                            set.ident = TRUE)
+e105fgC <- ScaleData(e105fgC, vars.to.regress = c("S.Score", "G2M.Score","nCount_RNA"))
+
+e105fgC <- RunPCA(object = e105fgC, features = VariableFeatures(object = e105fgC))
+print(x = e105fgC[["pca"]], dims = 1:5, nfeatures = 5)
+
+VizDimLoadings(object = e105fgC, dims = 1:2, reduction = "pca")
+DimPlot(object = e105fgC, reduction = "pca")
+ElbowPlot(object = e105fgC)
+
+e105fgC <- FindNeighbors(object = e105fgC, dims = 1:15)
+e105fgC <- FindClusters(object = e105fgC, resolution = 0.3)
+
+e105fgC <- RunUMAP(object = e105fgC, dims = 1:15)
+DimPlot(object = e105fgC, reduction = "umap")
+
+saveRDS(e105fgC, file = "seuratV3_e105fgC_dim15_res0.3.rds")
+
+cluster5.markers <- FindMarkers(object = e105fgC, ident.1 = 5, min.pct = 0.25)
+head(x = cluster5.markers, n = 5)
+
+### remove mesenchymal cells
+e105fgC.sub1 <- SubsetData(object = e105fgC, ident.remove=5)
+DimPlot(object = e105fgC.sub1, reduction = "umap")
+
+e105fgC.sub1 <- FindNeighbors(object = e105fgC.sub1, dims = 1:15)
+e105fgC.sub1 <- FindClusters(object = e105fgC.sub1, resolution = 0.3)
+
+e105fgC.sub1 <- RunUMAP(object = e105fgC.sub1, dims = 1:15)
+DimPlot(object = e105fgC.sub1, reduction = "umap")
+saveRDS(e105fgC.sub1, file = "seuratV3_e105fgC.sub1_dim15_res0.3.rds")
+
+### remove thyroid
+e105fgC.sub2 <- SubsetData(object = e105fgC, ident.remove=c("4","5"))
+DimPlot(object = e105fgC.sub2, reduction = "umap")
+
+e105fgC.sub2 <- FindNeighbors(object = e105fgC.sub2, dims = 1:15)
+e105fgC.sub2 <- FindClusters(object = e105fgC.sub2, resolution = 0.3)
+
+e105fgC.sub2 <- RunUMAP(object = e105fgC.sub2, dims = 1:15)
+DimPlot(object = e105fgC.sub2, reduction = "umap")
+
+cluster5.markers <- FindMarkers(object = e105fgC.sub2, ident.1 = 5, min.pct = 0.25)
+head(x = cluster5.markers, n = 5)
+
+saveRDS(e105fgC.sub2, file = "seuratV3_e105fgC.sub2_dim15_res0.3.rds")
+
+###################################################################################################
+###################################################################################################
+###################################################################################################
+
+#e115 data
+
+e115fg.data <- Read10X(data.dir = "filtered_gene_bc_matrices/e10-5_FG_eppos/")
+e115fg <- CreateSeuratObject(counts = e115fg.data, min.cells = 3, min.features = 200, 
+                             project = "e115FG")
+
+e115fg[["percent.mt"]] <- PercentageFeatureSet(object = e115fg, pattern = "^mt-")
+
+VlnPlot(object = e115fg, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3)
+
+e115fg <- subset(x = e115fg, subset = nFeature_RNA > 2600 & nFeature_RNA < 7500 & percent.mt > 0.5 & percent.mt < 7.5)
+e115fg <- NormalizeData(object = e115fg, normalization.method = "LogNormalize", scale.factor = 10000)
+e115fg <- FindVariableFeatures(object = e115fg, selection.method = "vst", nfeatures = 2000)
+
+e115fgC <- CellCycleScoring(object = e115fg, s.features = s.genes, g2m.features = g2m.genes, 
+                            set.ident = TRUE)
+e115fgC <- ScaleData(e115fgC, vars.to.regress = c("S.Score", "G2M.Score","nCount_RNA"))
+
+e115fgC <- RunPCA(object = e115fgC, features = VariableFeatures(object = e115fgC))
+print(x = e115fgC[["pca"]], dims = 1:5, nfeatures = 5)
+
+VizDimLoadings(object = e115fgC, dims = 1:2, reduction = "pca")
+DimPlot(object = e115fgC, reduction = "pca")
+ElbowPlot(object = e115fgC)
+
+e115fgC <- FindNeighbors(object = e115fgC, dims = 1:15)
+e115fgC <- FindClusters(object = e115fgC, resolution = 0.3)
+
+e115fgC <- RunUMAP(object = e115fgC, dims = 1:15)
+DimPlot(object = e115fgC, reduction = "umap")
+saveRDS(e115fgC, file = "seuratV3_e115fgC_dim15_res0.3.rds")
+
+e115fgC.sub1 <- SubsetData(object = e115fgC, ident.remove=c("5","6"))
+DimPlot(object = e115fgC.sub1, reduction = "umap")
+# 
+ e115fgC.sub1 <- FindNeighbors(object = e115fgC.sub1, dims = 1:20)
+ e115fgC.sub1 <- FindClusters(object = e115fgC.sub1, resolution = 0.2)
+# 
+ e115fgC.sub1 <- RunUMAP(object = e115fgC.sub1, dims = 1:20)
+ DimPlot(object = e115fgC.sub1, reduction = "umap")
+FeaturePlot(object = e115fgC.sub1, features = c("Nkx2-1","Sox2","Pitx1","Sfrp1"))
+
+saveRDS(e115fgC.sub1, file = "seuratV3_e115fgC.sub1_dim20_res0.2.rds")
+
+#### DESeq2 trachea vs esophagus, using e115fgC.sub1
+#trachea = cluster 0, esophagus = cluster 2
+library("DESeq2")
+trvses.10DESeq <- FindMarkers(e115fgC.sub1, ident.1 = "0", ident.2 = "2", test.use = "DESeq2", max.cells.per.ident = 600)
+head(trvses.10DESeq)
+#               p_val avg_logFC pct.1 pct.2    p_val_adj
+# Pitx1  3.127732e-71 -31.76375 0.112 0.995 5.416294e-67
+# Cdkn1c 8.212655e-60 112.02016 1.000 0.992 1.422185e-55
+# Nkx2-1 7.055139e-53  15.95957 0.965 0.093 1.221738e-48
+# Wnt7b  6.562855e-51  20.07235 0.966 0.142 1.136490e-46
+# Nr2f2  4.311909e-41  33.76981 0.995 0.552 7.466933e-37
+# Crlf1  4.459683e-38  11.95291 0.915 0.068 7.722833e-34
+
+trvses.10DESeq <- trvses.10DESeq[order(trvses.10DESeq$avg_logFC),]
+write.table(trvses.10DESeq, "DESeq2-10Xtrvses-ALL_600cells.txt", sep="\t", quote=F, row.names=T) #export ordered DESeq table
+
+trvses.10DESeqF<-subset(trvses.10DESeq, trvses.10DESeq$p_val_adj < 0.05) #Subset table to genes with padj>0.05
+dim(trvses.10DESeqF) #1322
+trvses.10DESeqFC<-subset(trvses.10DESeqF, trvses.10DESeqF$avg_logFC < -0.21 | trvses.10DESeqF$avg_logFC >0.21) #968. Subset table to genes with padj>0.05 and log2FC > |-1|
+dim(trvses.10DESeqFC) #1302
+#write.table(toptableF, "DESeq2-CPM0-toptable-mesenchyme-padj05.txt", sep="\t", quote=F, row.names=T) #export all padj>0.05 gene expression
+#write.table(toptableFC, "DESeq2-CPM0-toptable-mesenchyme-padj05-logfc1.txt", sep="\t", quote=F, row.names=T) # export all padj>0.05 and log2FC > |-1| gene expression
+#toptableFC0.7<-subset(toptableF, toptableF$log2FoldChange < -0.7 | toptableF$log2FoldChange >0.7) #1295
+#write.table(toptableFC0.7, "DESeq2-CPM0-toptable-mesenchyme-padj05-logfc0.7.txt", sep="\t", quote=F, row.names=T)
+
+
+
+#create column in toptable1 that specifies point color
+trvses.10DESeq$Color = "black" #makes all genes black
+trvses.10DESeq$Color[trvses.10DESeq$avg_logFC > 0.21 & trvses.10DESeq$p_val_adj < 0.05] = "red" #makes genes up in trachea red
+trvses.10DESeq$Color[trvses.10DESeq$avg_logFC < -0.21 & trvses.10DESeq$p_val_adj< 0.05] = "deepskyblue" #makes genes down in trachea (up in esophagus) blue
+#write.table(toptable1, "DESeq2-CPM0-toptable-mesenchyme-ALL-color.txt", sep="\t", quote=F, row.names=T) #write out table
+
+trvses.10DESeq<-as.data.frame(trvses.10DESeq)
+dim(trvses.10DESeq)
+
+trvses.10DESeq.black <- subset(trvses.10DESeq, trvses.10DESeq$Color=="black")
+dim(trvses.10DESeq.black) #8639
+
+#add means to DESeq
+#get mean exp
+mean.exp <- as.data.frame(AverageExpression(e115fgC.sub1))
+head(mean.exp)
+mean.exp$mean <- rowMeans(mean.exp)
+mean.exp["Igfbp2",]
+
+trvses.10DESeq <- trvses.10DESeq[,1:6]
+trvses.10DESeq$mean
+trvses.10DESeq.mean <- cbind(trvses.10DESeq, mean.exp$mean[match(rownames(trvses.10DESeq), rownames(mean.exp))])
+head(trvses.10DESeq.mean)
+colnames(trvses.10DESeq.mean)[7] <- "meanexp"
+  
+trvses.10DESeq <- trvses.10DESeq[order(trvses.10DESeq$p_val_adj),]
+trvses.10DESeq.top30padj <- trvses.10DESeq[1:29,]
+
+features <- c("Nkx2-1","Wnt7b","Pcdh10","Pitx1","Mnx1","Sox2")
+features2 <- subset(trvses.10DESeq, row.names(trvses.10DESeq) %in% features)
+features2
+
+par(mar=c(1,1,1,1))
+ggplot(data=trvses.10DESeq.mean, aes(avg_logFC,-log2(p_val_adj))) + #plot avg_logFC on x axis, -log10(p_val_adj on y-axis
+  geom_point(alpha=0.5, size=1, color=trvses.10DESeq$Color) + #size and color of points
+  #geom_text(data=trvses.10DESeq.top30padj, colour = "black", size = 5,
+  #          label=rownames(trvses.10DESeq.top30padj), hjust = 0, nudge_x = 0.05, fontface="bold") + #labels all points
+  #geom_hline(yintercept = 0, colour = "black", size=1) + #create y-intercept line at 0
+ # geom_hline(yintercept = 0.21, colour = "red", size=0.8) + #create y-intercept line at log1FC = 1
+  #geom_hline(yintercept = -0.21, colour = "deepskyblue", size=0.8) + #create y-intercept line at log1FC = -1
+  #scale_y_continuous(breaks=seq(-10,500,50)) + #set y-axis tick marks/scale
+  #ylim(-150,150) +
+  xlim(-200,200) +
+  xlab("avg_logFC") + ylab("-log10pvaladj") + # x- and y-axis labels
+  theme(panel.background=element_rect(fill="white"), panel.grid.major=element_line(color="white", size=1)) + #background fill white, major grids white
+  theme(axis.text.x=element_text(size=20, color="black"), axis.text.y=element_text(size=20, color="black")) + #x- and y-axis font size
+  ggtitle("Trachea vs Esophagus 10X") + #plot title
+  theme(plot.title = element_text(size=18)) #dont know
+
+#get mean exp
+mean.exp <- as.data.frame(AverageExpression(e115fgC.sub1))
+head(mean.exp)
+mean.exp$mean <- rowMeans(mean.exp)
+
+
+mutDOWN <- read.table("mutDOWN-padj05-logfc0.7.txt", header=T, sep="")
+head(mutDOWN)
+dim(mutDOWN) #[1] 148   6
+
+mutUP <- read.table("mutUP-padj05-logfc0.7.txt", header=T, sep="")
+head(mutUP)
+tail(mutUP)
+dim(mutUP) #[1] 109   6
+
+es.10DESeqFC<-subset(trvses.10DESeqF, trvses.10DESeqF$avg_logFC < -0.21)
+dim(es.10DESeqFC) #399
+es.600c.mutUP <- subset(es.10DESeqFC, row.names(es.10DESeqFC) %in% row.names(mutUP))
+dim(es.600c.mutUP) #17
+es.600c.mutDOWN <- subset(es.10DESeqFC, row.names(es.10DESeqFC) %in% row.names(mutDOWN))
+dim(es.600c.mutDOWN) #1
+
+tr.10DESeqFC<-subset(trvses.10DESeqF, trvses.10DESeqF$avg_logFC > 0.21)
+dim(tr.10DESeqFC) #903
+tr.600c.mutUP <- subset(tr.10DESeqFC, row.names(tr.10DESeqFC) %in% row.names(mutUP))
+dim(tr.600c.mutUP) #4
+tr.600c.mutDOWN <- subset(tr.10DESeqFC, row.names(tr.10DESeqFC) %in% row.names(mutDOWN))
+dim(tr.600c.mutDOWN) #1
+
+trvses.10DESeq100c <- FindMarkers(e115fgC.sub1, ident.1 = "0", ident.2 = "2", test.use = "DESeq2", max.cells.per.ident = 100)
+head(trvses.10DESeq100c)
+# p_val avg_logFC pct.1 pct.2     p_val_adj
+# Pitx1  2.333365e-138 -31.76375 0.112 0.995 4.040688e-134
+# Nkx2-1 3.911752e-100  15.95957 0.965 0.093  6.773981e-96
+# Cdkn1c  3.621589e-97 112.02016 1.000 0.992  6.271506e-93
+# Wnt7b   9.097067e-95  20.07235 0.966 0.142  1.575339e-90
+# Dcn     1.714225e-84 -23.04199 0.231 0.987  2.968524e-80
+# Nr2f2   2.681057e-82  33.76981 0.995 0.552  4.642787e-78
+
+trvses.10DESeq100c <- trvses.10DESeq100c[order(trvses.10DESeq100c$avg_logFC),]
+write.table(trvses.10DESeq100c, "DESeq2-10Xtrvses-ALL_100cells.txt", sep="\t", quote=F, row.names=T) #export ordered DESeq table
+
+trvses.10DESeq100cF<-subset(trvses.10DESeq100c, trvses.10DESeq100c$p_val_adj < 0.05) #Subset table to genes with padj>0.05
+dim(trvses.10DESeq100cF) #308
+trvses.10DESeq100cFC<-subset(trvses.10DESeq100cF, trvses.10DESeq100cF$avg_logFC < -0.21 | trvses.10DESeq100cF$avg_logFC >0.21) #968. Subset table to genes with padj>0.05 and log2FC > |-1|
+dim(trvses.10DESeq100cFC) #306
+
+es.10DESeq100cFC<-subset(trvses.10DESeq100cF, trvses.10DESeq100cF$avg_logFC < -0.21)
+dim(es.10DESeq100cFC) #136
+es.100c.mutUP <- subset(es.10DESeq100cFC, row.names(es.10DESeq100cFC) %in% row.names(mutUP))
+dim(es.100c.mutUP) #11
+es.100c.mutDOWN <- subset(es.10DESeq100cFC, row.names(es.10DESeq100cFC) %in% row.names(mutDOWN))
+dim(es.100c.mutDOWN) #1
+
+tr.10DESeq100cFC<-subset(trvses.10DESeq100cF, trvses.10DESeq100cF$avg_logFC > 0.21)
+dim(tr.10DESeq100cFC) #170
+tr.100c.mutUP <- subset(tr.10DESeq100cFC, row.names(tr.10DESeq100cFC) %in% row.names(mutUP))
+dim(tr.100c.mutUP) #1
+tr.100c.mutDOWN <- subset(tr.10DESeq100cFC, row.names(tr.10DESeq100cFC) %in% row.names(mutDOWN))
+dim(tr.100c.mutDOWN) #24
+
+trvses.10DESeq100c$Color = "black" #makes all genes black
+trvses.10DESeq100c$Color[trvses.10DESeq100c$avg_logFC > 0.21 & trvses.10DESeq100c$p_val_adj < 0.05] = "red" #makes genes up in trachea red
+trvses.10DESeq100c$Color[trvses.10DESeq100c$avg_logFC < -0.21 & trvses.10DESeq100c$p_val_adj< 0.05] = "deepskyblue" #makes genes down in trachea (up in esophagus) blue
+#write.table(toptable1, "DESeq2-CPM0-toptable-mesenchyme-ALL-color.txt", sep="\t", quote=F, row.names=T) #write out table
+
+trvses.10DESeq100c<-as.data.frame(trvses.10DESeq100c)
+head(trvses.10DESeq100c)
+ggplot(data=trvses.10DESeq100c, aes(avg_logFC,-log2(p_val_adj))) + #plot avg_logFC on x axis, -log10(p_val_adj on y-axis
+  geom_point(alpha=0.5, size=1, color=trvses.10DESeq100c$Color) + #size and color of points
+  #geom_text(data=trvses.10DESeq.top30padj, colour = "black", size = 5,
+  #          label=rownames(trvses.10DESeq.top30padj), hjust = 0, nudge_x = 0.05, fontface="bold") + #labels all points
+  #geom_hline(yintercept = 0, colour = "black", size=1) + #create y-intercept line at 0
+  # geom_hline(yintercept = 0.21, colour = "red", size=0.8) + #create y-intercept line at log1FC = 1
+  #geom_hline(yintercept = -0.21, colour = "deepskyblue", size=0.8) + #create y-intercept line at log1FC = -1
+  #scale_y_continuous(breaks=seq(-10,500,50)) + #set y-axis tick marks/scale
+  #ylim(-150,150) +
+  xlim(-200,200) +
+  xlab("avg_logFC") + ylab("-log10pvaladj") + # x- and y-axis labels
+  theme(panel.background=element_rect(fill="white"), panel.grid.major=element_line(color="white", size=1)) + #background fill white, major grids white
+  theme(axis.text.x=element_text(size=20, color="black"), axis.text.y=element_text(size=20, color="black")) + #x- and y-axis font size
+  ggtitle("Trachea vs Esophagus 10X") + #plot title
+  theme(plot.title = element_text(size=18)) #dont know
+
+
+###################################################################################################
+###################################################################################################
+###################################################################################################
+
+#combine e115 lng and fg
+
+#e115fg already normalized and found variable features
+
+#bring in lung data
+e115lng.data <- Read10X(data.dir = "filtered_gene_bc_matrices/e10-5_LNG_eppos/mm10")
+
+e115fg2 <- CreateSeuratObject(counts = e115fg.data, min.cells = 3, min.features = 200, 
+                              project = "e115FG")
+
+e115lng2 <- CreateSeuratObject(counts = e115lng.data, min.cells = 3, min.features = 200, 
+                               project = "e115LNG")
+
+e115all <- merge(e115fg2, y = e115lng2, add.cell.ids = c("fg", "lng"), project = "e115all", merge.data=TRUE)
+e115all[["percent.mt"]] <- PercentageFeatureSet(object = e115all, pattern = "^mt-")
+
+VlnPlot(object = e115all, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3)
+
+e115all <- subset(x = e115all, subset = nFeature_RNA > 2600 & nFeature_RNA < 7500 & percent.mt > 0.5 & percent.mt < 7.5)
+e115all <- NormalizeData(object = e115all, normalization.method = "LogNormalize", scale.factor = 10000)
+e115all <- FindVariableFeatures(object = e115all, selection.method = "vst", nfeatures = 2000)
+
+e115allC <- CellCycleScoring(object = e115all, s.features = s.genes, g2m.features = g2m.genes,
+                                        set.ident = TRUE)
+e115allC <- ScaleData(e115allC, vars.to.regress = c("S.Score", "G2M.Score", "nCount_RNA"))
+
+e115allC <- RunPCA(object = e115allC, features = VariableFeatures(object = e115allC))
+print(x = e115allC[["pca"]], dims = 1:5, nfeatures = 5)
+
+VizDimLoadings(object = e115allC, dims = 1:2, reduction = "pca")
+DimPlot(object = e115allC, reduction = "pca")
+ElbowPlot(object = e115allC)
+
+e115allC <- FindNeighbors(object = e115allC, dims = 1:15)
+e115allC <- FindClusters(object = e115allC, resolution = 0.35)
+
+e115allC <- RunUMAP(object = e115allC, dims = 1:15)
+DimPlot(object = e115allC, reduction = "umap")
+DimPlot(object = e115allC, reduction = "umap", group.by="orig.ident")
+FeaturePlot(object = e115allC, features = c("Nkx2-1","Sox2","Epcam"))
+saveRDS(e115allC, file = "seuratV3_e115allC_dim15_res0.35.rds")
+
+
+e115allC.sub1 <- SubsetData(object = e115allC, ident.remove=c("7"))
+DimPlot(object = e115allC.sub1, reduction = "umap")
+
+e115allC.sub1 <- FindNeighbors(object = e115allC.sub1, dims = 1:13)
+e115allC.sub1 <- FindClusters(object = e115allC.sub1, resolution = 0.35)
+
+e115allC.sub1 <- RunUMAP(object = e115allC.sub1, dims = 1:13)
+DimPlot(object = e115allC.sub1, reduction = "umap")
+saveRDS(e115allC.sub1, file = "seuratV3_e115allC.sub1_dim13_res0.35.rds")
+
+
+####subset out thyroid and mesenchymal contam
+e115allC.sub2 <- SubsetData(object = e115allC, ident.remove=c("6","7"))
+DimPlot(object = e115allC.sub2, reduction = "umap")
+
+e115allC.sub2 <- FindNeighbors(object = e115allC.sub2, dims = 1:13)
+e115allC.sub2 <- FindClusters(object = e115allC.sub2, resolution = 0.35)
+
+e115allC.sub2 <- RunUMAP(object = e115allC.sub2, dims = 1:13)
+DimPlot(object = e115allC.sub2, reduction = "umap")
+saveRDS(e115allC.sub1, file = "seuratV3_e115allC.sub2_dim13_res0.35.rds")
+
+
+
+
+DimPlot(object = e115all.normalizedC.sub1, reduction = "umap", group.by="orig.ident")
+
+e115all.normalizedC.sub1.markers <- FindAllMarkers(e115all.normalizedC.sub1, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25)
+e115all.normalizedC.sub1.markers %>% group_by(cluster) %>% top_n(n = 2, wt = avg_logFC)
+
+e115all.normalizedC.sub1.markers.2 <- e115all.normalizedC.sub1.markers[e115all.normalizedC.sub1.markers$cluster=="2",]
+e115all.normalizedC.sub1.markers.2.top6 <- e115all.normalizedC.sub1.markers.2 %>% top_n(15, avg_logFC)
+
+e115all.normalizedC.sub1.markers.trvlng <- FindMarkers(e115all.normalizedC.sub1, ident.1 = 2, ident.2 = c(0, 1, 4, 5), min.pct = 0.25)
+head(e115all.normalizedC.sub1.markers.trvlng, n = 10)
+
+FeaturePlot(object = e115all.normalizedC.sub1, features = c("Map1b"),min.cutoff = "q10", max.cutoff = "q90")
+cluster6.markers <- FindMarkers(object = e115all.normalizedC.sub1, ident.1 = 6, min.pct = 0.25)
+head(x = cluster6.markers, n = 5)
+
+
+####making plots
+
+#combine two genes
+FeaturePlot(e105fgC.sub1, features = c("Nkx2-1","Sox2"), blend=T)
+
+#regular feature plot
+FeaturePlot(e105fgC.sub1, features = c("Nkx2-1","Sox2"), cols=c("magenta","cyan4")) 
+
+FeaturePlot(e105fgC.sub1, features = c("Nkx2-1"), cols=c("grey88","red"), min.cutoff = "q10", max.cutoff = "q90") + DarkTheme() + NoAxes()
+
+FeaturePlot(e105fgC.sub1, features = c("Sox2"), cols=c("grey88","red"), min.cutoff = "q10", max.cutoff = "q90") + 
+  DarkTheme() + 
+  NoAxes() +
+  NoLegend()
+
+FeaturePlot(e115all.normalizedC.sub1, features = c("Klf6"), cols=c("grey88","red"), min.cutoff = "q10", max.cutoff = "q90") + 
+  DarkTheme() + 
+  NoAxes() +
+  NoLegend()
+
+
+DimPlot(e105fgC.sub1)  +
+  scale_colour_manual(values = c("magenta","lightpink", "cyan4","cyan", "grey")) +
+  DarkTheme() + 
+  NoAxes() +
+  NoLegend()
+
+DimPlot(e115all.normalizedC.sub1)  +
+  scale_colour_manual(values = c("indianred1","lightpink","magenta", "cyan4","mediumvioletred","plum2","cyan")) +
+  DarkTheme() + 
+  NoAxes() +
+  NoLegend()
+
+e115all.normalizedC.sub1.markers.0 <- e115all.normalizedC.sub1.markers[e115all.normalizedC.sub1.markers$cluster=="0",]
+
+features2 <- e115all.normalizedC.sub1.markers.2 %>% top_n(20, avg_logFC)
+features2 <- features2[-c(6, 11), ]
+
+features0 <- e115all.normalizedC.sub1.markers.0 %>% top_n(5, avg_logFC)
+
+e115all.normalizedC.sub1.markers.1 <- e115all.normalizedC.sub1.markers[e115all.normalizedC.sub1.markers$cluster=="1",]
+features1 <- e115all.normalizedC.sub1.markers.1 %>% top_n(5, avg_logFC)
+
+e115all.normalizedC.sub1.markers.4 <- e115all.normalizedC.sub1.markers[e115all.normalizedC.sub1.markers$cluster=="4",]
+features4 <- e115all.normalizedC.sub1.markers.4 %>% top_n(5, avg_logFC)
+
+e115all.normalizedC.sub1.markers.5 <- e115all.normalizedC.sub1.markers[e115all.normalizedC.sub1.markers$cluster=="5",]
+features5 <- e115all.normalizedC.sub1.markers.5 %>% top_n(5, avg_logFC)
+
+
+featuresall <- rbind(features2,features0,features1,features4,features5)
+tail(featuresall)
+features <- featuresall$gene
+
+DoHeatmap(subset(e115all.normalizedC.sub1.resp, downsample = 100, ), features = features, size = 3) +
+  scale_fill_gradientn(colors = c("skyblue4","skyblue4","white","orangered","orangered")) +
+  DarkTheme()
+
+e115all.normalizedC.sub1.resp <- SubsetData(object = e115all.normalizedC.sub1, ident.remove=c("3","6"))
+DimPlot(object = e115all.normalizedC.sub1.resp, reduction = "umap")
+
+e105fgC.sub1.markers <- FindAllMarkers(e105fgC.sub1, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25)
+e105fgC.sub1.markers.top10 <- e105fgC.sub1.markers %>% group_by(cluster) %>% top_n(n = 10, wt = avg_logFC)
+
+e105fgC.sub1.markers.0 <- e105fgC.sub1.markers[e105fgC.sub1.markers$cluster=="0",]
+features0 <- e105fgC.sub1.markers.0 %>% top_n(20, avg_logFC)
+
+e105fgC.sub1.markers.pcdh10 <- e105fgC.sub1.markers[e105fgC.sub1.markers$gene=="Pcdh10",]
+e105fgC.sub1.markers.pcdh10
+e105fgC.sub1.markers.1 <- e105fgC.sub1.markers[e105fgC.sub1.markers$cluster=="1",]
+features1 <- e105fgC.sub1.markers.1 %>% top_n(20, avg_logFC)
+
+featuresall <- rbind(e105fgC.sub1.markers.pcdh10,features0,features1)
+features <- featuresall$gene
+DoHeatmap(subset(e105fgC.sub1, downsample = 100, ), features = features, size = 3) +
+  scale_fill_gradientn(colors = c("skyblue4","skyblue4","white","orangered","orangered")) +
+  DarkTheme()
+
+DimPlot(object = e105fgC.sub1, reduction = "umap")
+
+e105trves.markers <- FindMarkers(object = e105fgC.sub1, ident.1 = 0,ident.2 = 3, min.pct = 0.25)
+
+e105trves.markers$gene <- row.names(e105trves.markers)
+head(e105trves.markers)
+
+features0 <- e105trves.markers %>% top_n(20, avg_logFC)
+head(features0)
+
+features3 <- e105trves.markers %>% top_n(20, -avg_logFC)
+head(features3)
+
+
+
+
+
+e105fgC.sub1.fg <- SubsetData(object = e105fgC.sub1, ident.keep=c("0","3"))
+DimPlot(object = e105fgC.sub1.fg, reduction = "umap")
+
+
+featuresall <- rbind(features0,features3)
+features <- featuresall$gene
+DoHeatmap(subset(e105fgC.sub1.fg, downsample = 100, ), features = features, size = 3) +
+  scale_fill_gradientn(colors = c("skyblue4","skyblue4","white","orangered","orangered")) +
+  DarkTheme()
+
+FeaturePlot(e105fgC.sub1, features = c("Wnt7b"), cols=c("grey88","red"), min.cutoff = "q10", max.cutoff = "q90") + 
+  DarkTheme() + 
+  NoAxes() +
+  NoLegend()
+
+
+##################################################################################
+##################################################################################
+##################################################################################
+
+#look at where Nkx2.1 targets fall on this tSNE
+
+mutDOWN <- read.table("mutDOWN-padj05-logfc0.7.txt", header=T, sep="")
+head(mutDOWN)
+dim(mutDOWN) #[1] 148   6
+
+mutUP <- read.table("mutUP-padj05-logfc0.7.txt", header=T, sep="")
+head(mutUP)
+tail(mutUP)
+dim(mutUP) #[1] 109   6
+
+mutUP.genes <- row.names(mutUP)
+head(mutUP.genes)
+
+mutDOWN.genes <- row.names(mutDOWN)
+head(mutDOWN.genes)
+
+#mutCHANGE.genes <- c(mutUP.genes, mutDOWN.genes)
+#head(mutCHANGE.genes)
+#length(mutCHANGE.genes) #257
+
+######in e10.5 all epithelium (fg + lung)
+#mutCHANGE.genes.all <- subset(mutCHANGE.genes, mutCHANGE.genes %in% rownames(x = e115allC@raw.data))
+#length(mutCHANGE.genes.all) #240 from 257                             
+#head(mutCHANGE.genes.all)
+
+#e105fgC.sub1[["percent.nkx.down"]] <- PercentageFeatureSet(object = e105fgC.sub1, pattern = mutDOWN.genes)
+
+mutUP.genes.all <- subset(mutUP.genes, mutUP.genes %in% rownames(x = e105fgC.sub1))
+length(mutUP.genes.all) #103 from 109                             
+head(mutUP.genes.all)
+
+mutDOWN.genes.all <- subset(mutDOWN.genes, mutDOWN.genes %in% rownames(x = e105fgC.sub1))
+length(mutDOWN.genes.all) #137 from 148                             
+head(mutDOWN.genes.all)
+
+e105fgC.sub1[["percent.nkx.down"]] <- PercentageFeatureSet(object = e105fgC.sub1, features = c(mutDOWN.genes.all))
+e105fgC.sub1[["percent.nkx.up"]] <- PercentageFeatureSet(object = e105fgC.sub1, features = c(mutUP.genes.all))
+
+# #percent.mutCHANGE.all <- Matrix::colSums(e115allC@raw.data[mutCHANGE.genes.all, ]) / Matrix::colSums(e115allC@raw.data)
+# percent.mutDOWN.all <- Matrix::colSums(e105fgC.sub1[mutDOWN.genes.all, ]) / Matrix::colSums(e105fgC.sub1)
+# percent.mutUP.all <- Matrix::colSums(e105fgC.sub1[mutUP.genes.all, ]) / Matrix::colSums(e105fgC.sub1)
+# head(percent.mutDOWN.all)
+# 
+# e105fgC.sub1 <- AddMetaData(object = e105fgC.sub1,
+#                         metadata = percent.mutCHANGE.all,
+#                         col.name = "percent.mutCHANGE")
+# 
+# e105fgC.sub1 <- AddMetaData(object = e105fgC.sub1,
+#                         metadata = percent.mutDOWN.all,
+#                         col.name = "percent.mutDOWN")
+# 
+# e105fgC.sub1 <- AddMetaData(object = e105fgC.sub1,
+#                         metadata = percent.mutUP.all,
+#                         col.name = "percent.mutUP")
+
+FeaturePlot(e105fgC.sub1, features = c("percent.nkx.down"), 
+            min.cutoff = "q10", max.cutoff = "q90")
+
+FeaturePlot(e105fgC.sub1, features = c("percent.nkx.up"), 
+            min.cutoff = "q10", max.cutoff = "q90")
+
+
+mutUP.genes.all.e115 <- subset(mutUP.genes, mutUP.genes %in% rownames(x = e115all.normalizedC.sub1))
+length(mutUP.genes.all.e115) #103 from 109                             
+head(mutUP.genes.all.e115)
+
+mutDOWN.genes.all.e115 <- subset(mutDOWN.genes, mutDOWN.genes %in% rownames(x = e115all.normalizedC.sub1))
+length(mutDOWN.genes.all.e115) #137 from 148                             
+head(mutDOWN.genes.all.e115)
+
+e115all.normalizedC.sub1[["percent.nkx.down"]] <- PercentageFeatureSet(object = e115all.normalizedC.sub1, features = c(mutDOWN.genes.all.e115))
+e115all.normalizedC.sub1[["percent.nkx.up"]] <- PercentageFeatureSet(object = e115all.normalizedC.sub1, features = c(mutUP.genes.all.e115))
+
+FeaturePlot(e115all.normalizedC.sub1, features = c("percent.nkx.down"), cols=c("yellow","red"), 
+            min.cutoff = "q10", max.cutoff = "q90") +
+  DarkTheme() + 
+  NoAxes() 
+
+FeaturePlot(e115all.normalizedC.sub1, features = c("percent.nkx.up"), cols=c("yellow","red"), 
+            min.cutoff = "q10", max.cutoff = "q90") +
+  DarkTheme() + 
+  NoAxes() 
+
+FeaturePlot(e105fgC.sub1, features = "Lrig1", cols=c("grey88","blue","blue"), 
+            min.cutoff = "q10", max.cutoff = "q90") +
+  DarkTheme() + 
+  NoAxes() 
+
+
+### May 21, 2019
+e105fgC.sub1 <- readRDS("seuratV3_e105fgC.sub1_dim15_res0.3.rds")
+e115allC.sub2 <- readRDS("seuratV3_e115allC.sub2_dim13_res0.35.rds")
+e115allC.sub1 <- readRDS("seuratV3_e115allC.sub1_dim13_res0.35.rds")
+
+DimPlot(e105fgC.sub1)
+DimPlot(e115allC.sub2)
+DimPlot(e115allC.sub1)
+
+e115allC.sub2 <- SubsetData(object = e115allC.sub1, ident.remove = c("6"))
+e115allC.sub2 <- FindNeighbors(object = e115allC.sub2, dims = 1:13)
+e115allC.sub2 <- FindClusters(object = e115allC.sub2, resolution = 0.32)
+
+e115allC.sub2 <- RunUMAP(object = e115allC.sub2, dims = 1:13)
+DimPlot(object = e115allC.sub2, reduction = "umap")
+saveRDS(e115allC.sub2, file = "seuratV3_e115allC.sub2_dim13_res0.32.rds")
+
+FeaturePlot(e105fgC.sub1, features = c("Ly6h"), cols=c("grey88","darkgreen"), min.cutoff = "q10", max.cutoff = "q90", pt.size=0.3) + 
+  NoAxes() +
+  theme(legend.position = c(0.82, 0.7)) +
+  theme(plot.title = element_text(size = 20))
+
+FeaturePlot(e105fgC.sub1, features = c("Ccno"), cols=c("grey88","darkgreen"), pt.size=0.3) + 
+  NoAxes() +
+  theme(legend.position = c(0.82, 0.7)) +
+  theme(plot.title = element_text(size = 20))
+
+
+FeaturePlot(e115allC.sub2, features = c("Tppp3"), cols=c("grey88","darkgreen"), min.cutoff = "q10", max.cutoff = "q90", pt.size=0.3) + 
+  NoAxes()+
+  theme(legend.position = c(0.82, 0.8)) +
+  theme(plot.title = element_text(size = 20))
+
+FeaturePlot(e115allC.sub2, features = c("Ccno"), cols=c("grey88","darkgreen"), max.cutoff = "q90")
+
+
+e105.lng.markers <- FindMarkers(e105fgC.sub1, ident.1 = 1, min.pct = 0.25)
+head(e105.lng.markers)
+
+DimPlot(e105fgC.sub1)
+DimPlot(e115allC.sub2)  +
+  scale_colour_manual(values = c("darkseagreen4","magenta","blue", "green3","darkgreen","deepskyblue")) +
+  #DarkTheme() + 
+  NoAxes() +
+  NoLegend()
+
+DimPlot(e105fgC.sub1)  +
+  scale_colour_manual(values = c("magenta","darkgreen","blue", "deepskyblue","grey")) +
+  #DarkTheme() + 
+  NoAxes() +
+  NoLegend()
+  
+e115allC.sub2.markers <- FindAllMarkers(e115allC.sub2, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25)
+e115allC.sub2.top10 <- e115allC.sub2.markers %>% group_by(cluster) %>% top_n(n = 10, wt = avg_logFC)
+head(e115allC.sub2.top10)
+features <- e115allC.sub2.top10$gene
+DoHeatmap(subset(e115allC.sub2, downsample = 100), features = features, size = 3) +
+  scale_fill_gradientn(colors = c("skyblue4","skyblue4","white","orangered","orangered"))
+
+e105fgC.sub1.markers <- FindAllMarkers(e105fgC.sub1, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25)
+e105fgC.sub1.top5 <- e105fgC.sub1.markers %>% group_by(cluster) %>% top_n(n = 5, wt = avg_logFC)
+head(e105fgC.sub1.top5)
+
+
+features <- e105fgC.sub1.top5$gene
+DoHeatmap(subset(e105fgC.sub1, downsample = 100), features = features, size = 3) +
+  scale_fill_gradientn(colors = c("steelblue4","steelblue1","white","red", "red4"))
+
+DimPlot(e105fgC.sub1)
+levels(e105fgC.sub1)
+levels(e105fgC.sub1) <- c("0","1","2","3","4")
+DimPlot(e105fgC.sub1)
+
+levels(e105fgC.sub1) <- c("Trachea","Lung","Pharynx","Esophagus","Thyroid")
+
+DimPlot(e115allC.sub2)
+levels(e115allC.sub2) <- c("Lung1","Trachea","Pharynx","Lung2","Lung3","Esophagus")
+
+DoHeatmap(subset(e115allC.sub2, downsample = 100), features = features, size = 3) +
+  scale_fill_gradientn(colors = c("steelblue4","steelblue1","white","red","red4"))
+
+dim(e105fgC.sub1.markers)
+shared.markers <- subset(e105fgC.sub1.markers, e105fgC.sub1.markers$gene %in% e115allC.sub2.markers$gene)
+dim(e105fgC.sub1.markers)
+nrow(e105fgC.sub1.markers[e105fgC.sub1.markers$cluster=="0",]) #51
+
+#####shared markers
+
+#trachea
+trachea.markers.e105 <- e105fgC.sub1.markers[e105fgC.sub1.markers$cluster=="Trachea",]
+head(trachea.markers.e105)
+dim(trachea.markers.e105) #51
+
+trachea.markers.e115 <- e115allC.sub2.markers[e115allC.sub2.markers$cluster=="Trachea",]
+head(trachea.markers.e115)
+dim(trachea.markers.e115) #56
+
+shared.trachea <- subset(trachea.markers.e105, trachea.markers.e105$gene %in% trachea.markers.e115$gene)
+dim(shared.trachea) #9
+head(shared.trachea)
+shared.trachea.top5 <- shared.trachea %>% top_n(n = 5, wt = avg_logFC)
+head(shared.trachea)
+
+#esophagus
+esophagus.markers.e105 <- e105fgC.sub1.markers[e105fgC.sub1.markers$cluster=="Esophagus",]
+head(esophagus.markers.e105)
+dim(esophagus.markers.e105) #39
+
+esophagus.markers.e115 <- e115allC.sub2.markers[e115allC.sub2.markers$cluster=="Esophagus",]
+head(esophagus.markers.e115)
+dim(esophagus.markers.e115) #133
+
+shared.esophagus <- subset(esophagus.markers.e105, esophagus.markers.e105$gene %in% esophagus.markers.e115$gene)
+dim(shared.esophagus) #19
+head(shared.esophagus)
+
+shared.esophagus.top5 <- shared.esophagus %>% top_n(n = 5, wt = avg_logFC)
+head(shared.esophagus)
+
+#Pharynx
+pharynx.markers.e105 <- e105fgC.sub1.markers[e105fgC.sub1.markers$cluster=="Pharynx",]
+head(pharynx.markers.e105)
+dim(pharynx.markers.e105) #74
+
+pharynx.markers.e115 <- e115allC.sub2.markers[e115allC.sub2.markers$cluster=="Pharynx",]
+head(pharynx.markers.e115)
+dim(pharynx.markers.e115) #138
+
+shared.pharynx <- subset(pharynx.markers.e105, pharynx.markers.e105$gene %in% pharynx.markers.e115$gene)
+dim(shared.pharynx) #51
+head(shared.pharynx)
+
+shared.pharynx.top5 <- shared.pharynx %>% top_n(n = 5, wt = avg_logFC)
+head(shared.pharynx)
+
+#Lung, don't do shared, just get top 5 of each cluster in e115
+lung.markers.e105 <- e105fgC.sub1.markers[e105fgC.sub1.markers$cluster=="Lung",]
+head(lung.markers.e105)
+dim(lung.markers.e105) #67
+lung.e105.top5 <- lung.markers.e105 %>% top_n(n = 5, wt = avg_logFC)
+head(lung.e105.top5)
+
+lung1.markers.e115 <- e115allC.sub2.markers[e115allC.sub2.markers$cluster=="Lung1",]
+head(lung1.markers.e115)
+dim(lung1.markers.e115) #36
+lung1.top5 <- lung1.markers.e115 %>% top_n(n = 5, wt = avg_logFC)
+head(lung1.top5)
+
+lung2.markers.e115 <- e115allC.sub2.markers[e115allC.sub2.markers$cluster=="Lung2",]
+head(lung2.markers.e115)
+dim(lung2.markers.e115) #85
+lung2.top5 <- lung2.markers.e115 %>% top_n(n = 5, wt = avg_logFC)
+head(lung2.top5)
+
+lung3.markers.e115 <- e115allC.sub2.markers[e115allC.sub2.markers$cluster=="Lung3",]
+head(lung3.markers.e115)
+dim(lung3.markers.e115) #25
+lung3.top5 <- lung3.markers.e115 %>% top_n(n = 5, wt = avg_logFC)
+head(lung3.top5)
+
+all.e115.lung <- rbind(lung1.markers.e115,lung2.markers.e115, lung3.markers.e115)
+tail(all.e115.lung)
+
+shared.lung <- subset(lung.markers.e105, lung.markers.e105$gene %in% all.e115.lung$gene)
+dim(shared.lung) #47
+head(shared.lung)
+
+#thyroid
+thyroid.markers.e105 <- e105fgC.sub1.markers[e105fgC.sub1.markers$cluster=="Thyroid",]
+head(thyroid.markers.e105)
+dim(thyroid.markers.e105) #145
+thyroid.e105.top5 <- thyroid.markers.e105 %>% top_n(n = 5, wt = avg_logFC)
+head(thyroid.e105.top5)
+
+##combine and plot heatmap
+all.shared.markers <- rbind(shared.trachea.top5, shared.esophagus.top5, shared.pharynx.top5, lung.e105.top5,lung1.top5, lung2.top5, lung3.top5, thyroid.e105.top5)
+dim(all.shared.markers)
+head(all.shared.markers)
+
+features <- all.shared.markers$gene
+DoHeatmap(subset(e105fgC.sub1, downsample = 100), features = features, size = 3) +
+  scale_fill_gradientn(colors = c("steelblue4","steelblue1","white","red", "red4"))
+
+DoHeatmap(subset(e115allC.sub2, downsample = 100), features = features, size = 3) +
+  scale_fill_gradientn(colors = c("steelblue4","steelblue1","white","red", "red4"))
